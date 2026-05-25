@@ -1,0 +1,8 @@
+{
+  "api_key": "",
+  "font_scale": 1.0,
+  "last_contract_type": "",
+  "window_geometry": "",
+  "ocr_enabled": true,
+  "matcher_mode": "tfidf"
+}

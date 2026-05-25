@@ -1,0 +1,188 @@
+══════════════════════════════════════════════════════════════
+التعديلات المطلوبة على main.py — 8 تعديلات محددة
+══════════════════════════════════════════════════════════════
+
+━━━ التعديل ١: استيراد الملفات الجديدة ━━━
+ابحث عن:
+    from database import init_db, save_analysis, get_user_history, get_user_stats
+    from auth import show_login
+
+أضف بعده مباشرةً:
+    import config
+    from pdf_reader       import extract_headings as _extract_pdf
+    from clause_matcher   import match_clause, init_matcher, get_mode
+    from contract_detector import check_mismatch
+    from font_manager     import FontManager, ZoomBar
+
+    # تهيئة المطابقة الذكية
+    _matcher_mode = config.get("matcher_mode") or "tfidf"
+    init_matcher(_matcher_mode)
+
+    # مدير الخطوط (global)
+    FM = FontManager()
+
+
+━━━ التعديل ٢: تحديث قاموس F ليستخدم FM ━━━
+ابحث عن:
+    F = {
+        "title":   ("Arial", 26, "bold"),
+        ...
+    }
+
+احذف القاموس كاملاً وضع مكانه:
+    # الخطوط تُدار بواسطة FontManager — استخدم FM.F["اسم"]
+    F = FM.F   # يُحدَّث تلقائياً عند الضغط على +/-
+
+
+━━━ التعديل ٣: حفظ API Key في config بدلاً من الذاكرة ━━━
+في class SidePanel، دالة _save:
+ابحث عن:
+    def _save(self):
+        k = self.api_entry.get().strip()
+        if k.startswith("sk-"):
+            ST.api_key = k
+            self.key_lbl.configure(text="✓  تم الحفظ", text_color=C["glt"])
+        else:
+            self.key_lbl.configure(text="✗  مفتاح غير صالح", text_color=C["red"])
+
+غيّر إلى:
+    def _save(self):
+        k = self.api_entry.get().strip()
+        if k.startswith("sk-"):
+            ST.api_key = k
+            config.save_api_key(k)          # ← حفظ دائم
+            self.key_lbl.configure(text="✓  تم الحفظ", text_color=C["glt"])
+        else:
+            self.key_lbl.configure(text="✗  مفتاح غير صالح", text_color=C["red"])
+
+
+━━━ التعديل ٤: تحميل API Key عند الفتح ━━━
+في class State، دالة __init__:
+ابحث عن:
+    def __init__(self):
+        self.reset()
+        self.current_user = None
+
+أضف سطراً بعده:
+    def __init__(self):
+        self.reset()
+        self.current_user = None
+        self.api_key = config.get_api_key()   # ← تحميل من الملف
+
+
+━━━ التعديل ٥: تحقق من اختيار نوع العقد قبل التحليل ━━━
+في class AnalysisView، دالة _run:
+ابحث عن:
+    def _run(self):
+        if self._busy: return
+        self._busy = True
+
+غيّر إلى:
+    def _run(self):
+        if self._busy: return
+        # ── فحص: هل اختار المستخدم نوع العقد؟ ──────────
+        if not ST.contract_type:
+            messagebox.showwarning(
+                "لم يتم اختيار نوع العقد",
+                "⚠  يرجى اختيار نوع العقد أولاً من الشاشة الرئيسية\n"
+                "قبل البدء بالتحليل."
+            )
+            return
+        # ── فحص: هل رُفع ملف؟ ────────────────────────────
+        if not ST.pdf_path:
+            messagebox.showwarning(
+                "لم يتم رفع ملف",
+                "⚠  يرجى رفع ملف PDF أولاً."
+            )
+            return
+        self._busy = True
+
+
+━━━ التعديل ٦: استبدال extract_headings بالنسخة المحسّنة ━━━
+في class AnalysisView، دالة _extract_thread:
+ابحث عن:
+        text, heads = extract_headings(ST.pdf_path)
+        ST.raw_text, ST.found_headings = text, heads
+
+غيّر إلى:
+        try:
+            text, heads = _extract_pdf(
+                ST.pdf_path,
+                ocr_enabled=config.get("ocr_enabled")
+            )
+            ST.raw_text, ST.found_headings = text, heads
+        except ValueError as e:
+            # رسالة خطأ واضحة للمستخدم
+            self.after(0, lambda msg=str(e): messagebox.showerror(
+                "خطأ في قراءة الملف", msg))
+            self.after(0, lambda: self.btn_analyze.configure(state="disabled"))
+            self.after(0, lambda: self._upd_prog(0, "✗  فشل قراءة الملف"))
+            return
+
+
+━━━ التعديل ٧: فحص توافق نوع العقد بعد القراءة ━━━
+بعد سطر:
+        ST.raw_text, ST.found_headings = text, heads
+
+أضف:
+        # ── فحص توافق نوع العقد مع محتوى الملف ──────────
+        if ST.raw_text and ST.contract_type and len(ST.raw_text) > 200:
+            detect = check_mismatch(ST.raw_text, ST.contract_type)
+            if detect.is_mismatch and detect.confidence > 0.20:
+                self.after(0, lambda d=detect: self._warn_mismatch(d))
+
+وأضف دالة جديدة في AnalysisView:
+    def _warn_mismatch(self, detect):
+        """يُظهر تحذير عدم التوافق ويعطي المستخدم خيار التغيير."""
+        from tkinter import messagebox as mb
+        answer = mb.askyesno(
+            "⚠  تحذير: نوع العقد قد لا يكون صحيحاً",
+            f"{detect.warning_msg}\n\n{detect.suggestion}",
+            icon="warning"
+        )
+        if answer:
+            # المستخدم يريد تغيير النوع → ارجع للرئيسية
+            self.nav_cb("home")
+
+
+━━━ التعديل ٨: إضافة ZoomBar في TopBar ━━━
+في class TopBar، دالة __init__:
+ابحث عن (آخر سطر تقريباً في TopBar.__init__):
+        sb = ctk.CTkFrame(row, fg_color=C["bg2"], corner_radius=20, ...)
+
+قبله مباشرةً أضف:
+        # ── شريط التكبير/التصغير ────────────────────────
+        zoom = ZoomBar(row, FM)
+        zoom.pack(side="right", padx=(0, 8))
+
+══════════════════════════════════════════════════════════════
+الهيكل النهائي للمشروع:
+══════════════════════════════════════════════════════════════
+📁 المشروع/
+  ├── main.py              ← 8 تعديلات
+  ├── database.py          ← بدون تعديل
+  ├── auth.py              ← بدون تعديل
+  ├── config.py            ← جديد ✨
+  ├── pdf_reader.py        ← جديد ✨ (PDF + OCR)
+  ├── clause_matcher.py    ← جديد ✨ (TF-IDF + transformers)
+  ├── contract_detector.py ← جديد ✨ (كاشف النوع)
+  ├── font_manager.py      ← جديد ✨ (zoom +/-)
+  ├── settings.json        ← يُنشأ تلقائياً
+  └── negotiation/         ← بدون تعديل
+
+══════════════════════════════════════════════════════════════
+أوامر التثبيت (مرة واحدة):
+══════════════════════════════════════════════════════════════
+
+# إلزامي (TF-IDF):
+pip install scikit-learn
+
+# اختياري (OCR للصور الممسوحة):
+pip install pytesseract pillow
+# ثم ثبّت Tesseract من: https://github.com/UB-Mannheim/tesseract/wiki
+# وأضف: C:\Program Files\Tesseract-OCR  إلى PATH
+
+# اختياري (دقة مطابقة أعلى):
+pip install sentence-transformers
+
+══════════════════════════════════════════════════════════════
