@@ -1,0 +1,95 @@
+    ══════════════════════════════════════════════════════════════
+التعديلات المطلوبة على new_main.py — 5 تعديلات فقط
+لإضافة زر "تحليل صورة"
+══════════════════════════════════════════════════════════════
+
+━━━ التعديل ١: استيراد image_analyzer ━━━
+ابحث عن:
+    from font_manager      import FontManager, ZoomBar
+
+أضف بعده:
+    from image_analyzer    import ImageAnalysisView
+
+
+━━━ التعديل ٢: زر "تحليل صورة" في HomeView._build ━━━
+ابحث عن:
+    lbl(self,"اختر نوع العلاقة التعاقدية",F["sub"],C["t2"]
+        ).pack(anchor="w",padx=24,pady=(8,4))
+
+غيّر إلى:
+    # شريط العناوين مع زر تحليل الصورة
+    header_row = ctk.CTkFrame(self, fg_color="transparent")
+    header_row.pack(fill="x", padx=24, pady=(8,4))
+    lbl(header_row,"اختر نوع العلاقة التعاقدية",F["sub"],C["t2"]).pack(side="left")
+    ctk.CTkButton(
+        header_row, text="🖼  تحليل صورة عقد",
+        width=200, height=40,
+        fg_color=C["purple"], hover_color="#6D28D9",
+        text_color=C["white"], font=F["sm_b"],
+        corner_radius=12,
+        command=lambda: self.on_select("__image__")
+    ).pack(side="right")
+
+
+━━━ التعديل ٣: إنشاء ImageAnalysisView في App._build ━━━
+ابحث عن:
+    self.history_v  = HistoryView(self.content)
+
+أضف بعده:
+    self.img_v = ImageAnalysisView(
+        self.content,
+        side           = self.side,
+        nav_cb         = self._nav,
+        get_state      = lambda: ST,
+        analyze_fn     = analyze_rules,
+        contract_types = CONTRACT_TYPES,
+        save_fn        = save_analysis,
+    )
+
+
+━━━ التعديل ٤: إضافة "image" في App._nav ━━━
+ابحث عن:
+    for v in [self.home_v, self.analysis_v, self.report_v,
+              self.history_v, self.neg_v]:
+        v.pack_forget()
+
+غيّر إلى:
+    for v in [self.home_v, self.analysis_v, self.report_v,
+              self.history_v, self.neg_v, self.img_v]:
+        v.pack_forget()
+
+ثم ابحث عن:
+        elif view=="history":
+            self.history_v.pack(fill="both",expand=True)
+            self.history_v.refresh()
+            self.status.configure(text="سجل التحليلات")
+
+أضف بعده:
+        elif view=="image":
+            self.img_v.pack(fill="both", expand=True)
+            self.img_v.refresh_type()
+            self.status.configure(text="تحليل صورة العقد — OCR ذكي")
+
+
+━━━ التعديل ٥: معالجة "__image__" في App._on_type ━━━
+ابحث عن:
+    def _on_type(self, name):
+        ST.reset()
+        ST.contract_type = name
+        self.status.configure(text=f"تم اختيار: {name}")
+        self._nav("analysis")
+
+غيّر إلى:
+    def _on_type(self, name):
+        if name == "__image__":
+            # انتقل لشاشة تحليل الصورة مع الحفاظ على نوع العقد المحدد
+            self._nav("image")
+            return
+        ST.reset()
+        ST.contract_type = name
+        self.status.configure(text=f"تم اختيار: {name}")
+        self._nav("analysis")
+
+══════════════════════════════════════════════════════════════
+ملاحظة: إذا لم يكن neg_v موجوداً عندك، احذفه من قائمة pack_forget
+══════════════════════════════════════════════════════════════

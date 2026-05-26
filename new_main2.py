@@ -25,6 +25,7 @@ from pdf_reader        import extract_headings as _extract_pdf
 from clause_matcher    import match_clause, init_matcher, get_mode
 from contract_detector import check_mismatch
 from font_manager      import FontManager, ZoomBar
+from image_analyzer    import ImageAnalysisView
 
 # تهيئة المطابقة الذكية بالوضع المحفوظ
 _matcher_mode = config.get("matcher_mode") or "tfidf"
@@ -345,7 +346,7 @@ class TopBar(ctk.CTkFrame):
         tb = ctk.CTkFrame(row, fg_color="transparent")
         tb.pack(side="left", padx=14)
         lbl(tb, "نظام تحليل العقود الذكي", F["heading"], C["text"]).pack(anchor="w")
-        lbl(tb, "مشروع تخرج  •  تحليل بقواعد ذكية  •  v3.0", F["sm"], C["t3"]).pack(anchor="w")
+        lbl(tb, "مشروع تخرج  •  تحليل بقواعد ذكية  •  v4.0", F["sm"], C["t3"]).pack(anchor="w")
 
         nav = ctk.CTkFrame(row, fg_color="transparent")
         nav.pack(side="right")
@@ -402,25 +403,7 @@ class SidePanel(ctk.CTkFrame):
             self._cards.append(c)
         sep(inner, C["border"], pady=12)
 
-        # ── حقل API Key مع حفظ دائم ─────────────────────────
-        lbl(inner,"🔑  Claude API Key (اختياري)",F["sm_b"],C["gold"]).pack(anchor="w",pady=(0,6))
-        self.api_entry = ctk.CTkEntry(inner, placeholder_text="sk-ant-...",
-                                       show="•", height=38, corner_radius=8,
-                                       fg_color=C["bg2"], border_color=C["border"],
-                                       text_color=C["text"], font=F["sm"])
-        self.api_entry.pack(fill="x",pady=(0,6))
-        # تحميل المفتاح المحفوظ
-        saved_key = config.get_api_key()
-        if saved_key:
-            self.api_entry.insert(0, saved_key)
-        ctk.CTkButton(inner, text="💾  حفظ المفتاح", height=36,
-                       fg_color=C["gold"], hover_color="#B45309",
-                       text_color=C["white"], corner_radius=8,
-                       font=F["sm_b"], command=self._save_key).pack(fill="x")
-        self.key_lbl = lbl(inner,"✓ محفوظ" if saved_key else "",F["xs"],
-                           C["glt"] if saved_key else C["t3"])
-        self.key_lbl.pack(anchor="w",pady=(4,0))
-        sep(inner, C["border"], pady=10)
+
 
         tip = ctk.CTkFrame(inner, fg_color=C["bg2"], corner_radius=10,
                            border_width=1, border_color=C["bhi"])
@@ -517,6 +500,18 @@ class HomeView(ctk.CTkFrame):
 
         lbl(self,"اختر نوع العلاقة التعاقدية",F["sub"],C["t2"]
             ).pack(anchor="w",padx=24,pady=(8,4))
+
+        # ── زر تحليل صورة العقد ──────────────────────────────
+        img_bar = ctk.CTkFrame(self, fg_color="transparent")
+        img_bar.pack(fill="x", padx=24, pady=(0, 4))
+        ctk.CTkButton(
+            img_bar, text="🖼  تحليل صورة عقد  (OCR)",
+            width=240, height=42,
+            fg_color=C["purple"], hover_color="#6D28D9",
+            text_color=C["white"], font=F["sm_b"],
+            corner_radius=12,
+            command=lambda: self.on_select("__image__")
+        ).pack(side="right")
 
         sc = ctk.CTkScrollableFrame(self, fg_color=C["bg"], corner_radius=0)
         sc.pack(fill="both", expand=True, padx=16, pady=(0,16))
@@ -1447,6 +1442,15 @@ class App(ctk.CTk):
         self.analysis_v = AnalysisView(self.content, self.side, self._nav)
         self.report_v   = ReportView(self.content)
         self.history_v  = HistoryView(self.content)
+        self.img_v      = ImageAnalysisView(
+            self.content,
+            side           = self.side,
+            nav_cb         = self._nav,
+            get_state      = lambda: ST,
+            analyze_fn     = analyze_rules,
+            contract_types = CONTRACT_TYPES,
+            save_fn        = save_analysis,
+        )
 
         self._build_status()
         # ── تسجيل الدخول عند الإطلاق ──────────────────────
@@ -1475,7 +1479,8 @@ class App(ctk.CTk):
                 F["xs"],C["orange"]).pack(side="right",padx=14,pady=6)
 
     def _nav(self, view):
-        for v in [self.home_v, self.analysis_v, self.report_v, self.history_v]:
+        for v in [self.home_v, self.analysis_v, self.report_v,
+                  self.history_v, self.img_v]:
             v.pack_forget()
         if view=="home":
             self.home_v.pack(fill="both",expand=True)
@@ -1507,6 +1512,10 @@ class App(ctk.CTk):
             self.history_v.pack(fill="both",expand=True)
             self.history_v.refresh()
             self.status.configure(text="سجل التحليلات")
+        elif view=="image":
+            self.img_v.pack(fill="both", expand=True)
+            self.img_v.refresh_type()
+            self.status.configure(text="تحليل صورة العقد — OCR ذكي")
         elif view=="logout":
             if messagebox.askyesno("تأكيد","هل تريد تسجيل الخروج؟"):
                 ST.current_user = None
@@ -1528,6 +1537,9 @@ class App(ctk.CTk):
             self.destroy()
 
     def _on_type(self, name):
+        if name == "__image__":
+            self._nav("image")
+            return
         ST.reset()
         ST.contract_type = name
         self.status.configure(text=f"تم اختيار: {name}")
